@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return isAuth() && userDoc().exists() ? userDoc().data.role : null;
+    }
+
+    function userNgoId() {
+      return isAuth() && userDoc().exists() ? userDoc().data.ngoId : null;
+    }
+
+    function ownsNgo(ngoId) {
+      return role() == 'ngo_admin' && userNgoId() == ngoId;
+    }
+
+    function targetNgoId() {
+      return resource != null && resource.data.ngoId != null ? resource.data.ngoId : request.resource.data.ngoId;
+    }
+
+    match /users/{uid} {
+      allow read: if isAuth() && (request.auth.uid == uid || role() == 'super_admin');
+      allow create: if isAuth() && request.auth.uid == uid && request.resource.data.role == 'donor';
+      allow update: if role() == 'super_admin' || (
+        request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['name', 'photoURL'])
+      );
+    }
+
+    match /ngos/{ngoId} {
+      allow read: if true;
+      allow write: if role() == 'super_admin' || ownsNgo(ngoId);
+    }
+
+    match /needs/{needId} {
+  allow read: if true;
+  allow create: if isAuth() && role() == 'ngo_admin' && request.resource.data.ngoId == userNgoId();
+  allow update, delete: if isAuth() && (role() == 'super_admin' || ownsNgo(resource.data.ngoId));
+}
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create, delete: if role() == 'super_admin' || ownsNgo(targetNgoId());
+      allow update: if role() == 'super_admin' || ownsNgo(targetNgoId()) || (
+        isAuth() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['likedBy', 'likes', 'comments'])
+      );
+    }
+
+    match /donations/{donationId} {
+      allow create: if role() == 'donor' && request.resource.data.donorUid == request.auth.uid;
+      allow read: if isAuth() && (
+        request.auth.uid == resource.data.donorUid ||
+        role() == 'super_admin' ||
+        ownsNgo(resource.data.ngoId)
+      );
+      allow update: if role() == 'super_admin' || ownsNgo(resource.data.ngoId);
+    }
+
+    match /deliveries/{deliveryId} {
+      allow create: if role() == 'donor' && request.resource.data.donorUid == request.auth.uid;
+      allow read: if isAuth() && (
+        request.auth.uid == resource.data.donorUid ||
+        role() == 'super_admin' ||
+        ownsNgo(resource.data.ngoId)
+      );
+      allow update: if role() == 'super_admin' || ownsNgo(resource.data.ngoId);
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuth() && request.auth.uid == resource.data.recipientUid;
+      allow create: if role() == 'ngo_admin' || role() == 'super_admin';
+      allow update: if (
+        isAuth() &&
+        request.auth.uid == resource.data.recipientUid &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['read'])
+      ) || role() == 'ngo_admin' || role() == 'super_admin';
+    }
+
+    match /habits/{uid} {
+      allow read, write: if isAuth() && request.auth.uid == uid;
+    }
+
+    match /leaderboard/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /stats/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
+
