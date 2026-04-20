@@ -1,11 +1,30 @@
 import { useEffect, useState } from 'react';
-import { MapPin, Phone, Navigation, Heart, MessageCircle, ArrowRight, Share2 } from 'lucide-react';
+import { MapPin, Phone, Navigation, Heart, MessageCircle, Share2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import NeedCard from '../../components/NeedCard';
 import { fetchNgoById, fetchNgoNeeds, fetchNgoPosts, togglePostLike } from '../../services/ngoService';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDate } from '../../utils/date';
+
+const buildDirectionsUrl = (ngo) => {
+  const hasCoords = ngo?.lat && ngo?.lng && !isNaN(Number(ngo.lat)) && !isNaN(Number(ngo.lng));
+  const destination = hasCoords
+    ? `${ngo.lat},${ngo.lng}`
+    : encodeURIComponent(ngo?.address || '');
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+};
+
+const buildStaticMapUrl = (ngo, apiKey) => {
+  const hasCoords = ngo?.lat && ngo?.lng && !isNaN(Number(ngo.lat)) && !isNaN(Number(ngo.lng));
+  if (hasCoords) {
+    return `https://maps.googleapis.com/maps/api/staticmap?center=${ngo.lat},${ngo.lng}&zoom=15&size=600x200&markers=color:red%7Clabel:H%7C${ngo.lat},${ngo.lng}&key=${apiKey}&style=feature:all|saturation:-20`;
+  }
+  if (ngo?.address) {
+    return `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(ngo.address)}&zoom=15&size=600x200&markers=color:red%7Clabel:H%7C${encodeURIComponent(ngo.address)}&key=${apiKey}&style=feature:all|saturation:-20`;
+  }
+  return null;
+};
 
 export default function NGODetailPage() {
   const { ngoId } = useParams();
@@ -17,6 +36,7 @@ export default function NGODetailPage() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [mapError, setMapError] = useState(false);
 
   useEffect(() => {
     const loadNgo = async () => {
@@ -39,26 +59,27 @@ export default function NGODetailPage() {
 
   const handleDirections = () => {
     if (!ngo) return;
+    const url = buildDirectionsUrl(ngo);
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          const hasCoords =
+            ngo.lat && ngo.lng && !isNaN(Number(ngo.lat)) && !isNaN(Number(ngo.lng));
+          const destination = hasCoords
+            ? `${ngo.lat},${ngo.lng}`
+            : encodeURIComponent(ngo.address || '');
           window.open(
-            `https://www.google.com/maps/dir/?api=1&origin=${pos.coords.latitude},${pos.coords.longitude}&destination=${ngo.lat},${ngo.lng}&travelmode=driving`,
-            '_blank'
+            `https://www.google.com/maps/dir/?api=1&origin=${pos.coords.latitude},${pos.coords.longitude}&destination=${destination}&travelmode=driving`,
+            '_blank',
+            'noopener,noreferrer'
           );
         },
         () => {
-          window.open(
-            `https://www.google.com/maps/dir/?api=1&destination=${ngo.lat},${ngo.lng}&travelmode=driving`,
-            '_blank'
-          );
+          window.open(url, '_blank', 'noopener,noreferrer');
         }
       );
     } else {
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${ngo.lat},${ngo.lng}&travelmode=driving`,
-        '_blank'
-      );
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -81,8 +102,11 @@ export default function NGODetailPage() {
     await togglePostLike({ postId: post.postId, userId: user.uid, alreadyLiked });
   };
 
-  const hasValidLocation =
+  const hasCoords =
     ngo?.lat && ngo?.lng && !isNaN(Number(ngo.lat)) && !isNaN(Number(ngo.lng));
+  const hasAddress = Boolean(ngo?.address);
+  const canShowMap = hasCoords || hasAddress;
+  const staticMapUrl = ngo ? buildStaticMapUrl(ngo, import.meta.env.VITE_GOOGLE_MAPS_API_KEY) : null;
 
   if (loading) {
     return (
@@ -103,7 +127,6 @@ export default function NGODetailPage() {
 
   return (
     <div className="page-shell">
-      {/* Post detail modal */}
       <AnimatePresence>
         {selectedPost ? (
           <motion.div
@@ -113,10 +136,7 @@ export default function NGODetailPage() {
             className="fixed inset-0 z-50 bg-black flex flex-col"
             onClick={() => setSelectedPost(null)}
           >
-            <div
-              className="flex items-center justify-between px-4 py-3"
-              onClick={(e) => e.stopPropagation()}
-            >
+            <div className="flex items-center justify-between px-4 py-3" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-3">
                 <img
                   src={ngo.logoUrl || 'https://images.unsplash.com/photo-1519791883288-dc8bd696e667?auto=format&fit=crop&w=100&q=80'}
@@ -151,11 +171,14 @@ export default function NGODetailPage() {
                     }`}
                   />
                 </button>
-                <button type="button" onClick={() => {
-                  const text = `${selectedPost.caption} — ${ngo.name} on Celebrate With Purpose`;
-                  if (navigator.share) navigator.share({ text });
-                  else window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = `${selectedPost.caption} — ${ngo.name} on Celebrate With Purpose`;
+                    if (navigator.share) navigator.share({ text });
+                    else window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                  }}
+                >
                   <Share2 className="h-6 w-6 text-white" />
                 </button>
               </div>
@@ -189,7 +212,7 @@ export default function NGODetailPage() {
               })`,
             }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
             <div className="flex items-end gap-3">
               <img
@@ -199,14 +222,14 @@ export default function NGODetailPage() {
               />
               <div className="pb-1">
                 <h1 className="text-xl font-extrabold text-white leading-tight">{ngo.name}</h1>
-                <p className="text-xs text-white/70">{ngo.address}</p>
+                <p className="text-xs text-white/70 mt-0.5">{ngo.address}</p>
               </div>
             </div>
           </div>
         </div>
 
         <div className="bg-white px-4 pt-4 pb-0 space-y-4">
-          {/* Stats row */}
+          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-2xl bg-cream p-3 text-center">
               <p className="text-lg font-extrabold text-accent">₹{ngo.totalReceived || 0}</p>
@@ -222,32 +245,48 @@ export default function NGODetailPage() {
             </div>
           </div>
 
-          {/* Info */}
+          {/* Contact info */}
           <div className="space-y-2 text-sm text-muted">
-            <p className="flex items-start gap-2">
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-              {ngo.address}
-            </p>
-            <p className="flex items-center gap-2">
-              <Phone className="h-4 w-4 shrink-0 text-accent" />
-              {ngo.phone}
-            </p>
+            {ngo.address ? (
+              <button
+                type="button"
+                onClick={handleDirections}
+                className="flex items-start gap-2 w-full text-left hover:text-accent transition-colors"
+              >
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                <span className="underline underline-offset-2">{ngo.address}</span>
+              </button>
+            ) : null}
+            {ngo.phone ? (
+              <a href={`tel:${ngo.phone}`} className="flex items-center gap-2 hover:text-accent transition-colors">
+                <Phone className="h-4 w-4 shrink-0 text-accent" />
+                {ngo.phone}
+              </a>
+            ) : null}
           </div>
 
-          {/* Map preview */}
-          {hasValidLocation ? (
+          {/* Map section — works with address OR coordinates */}
+          {canShowMap ? (
             <button
               type="button"
               onClick={handleDirections}
-              className="relative w-full overflow-hidden rounded-2xl border border-slate-100"
+              className="relative w-full overflow-hidden rounded-2xl border border-slate-100 block"
             >
-              <img
-                src={`https://maps.googleapis.com/maps/api/staticmap?center=${ngo.lat},${ngo.lng}&zoom=14&size=600x200&markers=color:red%7C${ngo.lat},${ngo.lng}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&style=feature:all|saturation:-20`}
-                alt="location"
-                className="h-32 w-full object-cover"
-                onError={(e) => { e.target.parentElement.style.display = 'none'; }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+              {staticMapUrl && !mapError ? (
+                <img
+                  src={staticMapUrl}
+                  alt={`Map showing ${ngo.address || 'NGO location'}`}
+                  className="h-36 w-full object-cover"
+                  onError={() => setMapError(true)}
+                />
+              ) : (
+                <div className="h-36 w-full bg-slate-100 flex flex-col items-center justify-center gap-2">
+                  <MapPin className="h-8 w-8 text-accent" />
+                  <p className="text-sm font-semibold text-navy">{ngo.address}</p>
+                  <p className="text-xs text-muted">Tap to open in Google Maps</p>
+                </div>
+              )}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/10 hover:bg-black/20 transition-colors">
                 <div className="flex items-center gap-2 rounded-full bg-white px-4 py-2 shadow-lg">
                   <Navigation className="h-4 w-4 text-accent" />
                   <span className="text-sm font-bold text-navy">Get directions</span>
@@ -258,20 +297,19 @@ export default function NGODetailPage() {
 
           {/* CTA buttons */}
           <div className="grid grid-cols-2 gap-3">
-            {hasValidLocation ? (
-              <button
-                type="button"
-                onClick={handleDirections}
-                className="min-h-12 flex items-center justify-center gap-2 rounded-2xl border-2 border-navy text-sm font-bold text-navy"
-              >
-                <Navigation className="h-4 w-4" />
-                Directions
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={handleDirections}
+              disabled={!canShowMap}
+              className="min-h-12 flex items-center justify-center gap-2 rounded-2xl border-2 border-navy text-sm font-bold text-navy disabled:opacity-40"
+            >
+              <Navigation className="h-4 w-4" />
+              Directions
+            </button>
             <button
               type="button"
               onClick={() => navigate(`/ngo/${ngo.ngoId}/donate`)}
-              className={`min-h-12 rounded-2xl bg-accent text-sm font-bold text-white ${hasValidLocation ? '' : 'col-span-2'}`}
+              className="min-h-12 rounded-2xl bg-accent text-sm font-bold text-white"
             >
               Donate Online
             </button>
@@ -298,7 +336,7 @@ export default function NGODetailPage() {
         </div>
 
         {/* Tab content */}
-        <div className="bg-white px-4 pb-4 space-y-4 min-h-48">
+        <div className="bg-white px-4 pb-6 space-y-4 min-h-48">
           {tab === 'needs' ? (
             <div className="space-y-3 pt-3">
               {needs.length ? (
@@ -321,7 +359,16 @@ export default function NGODetailPage() {
                       <button
                         key={index}
                         type="button"
-                        onClick={() => setSelectedPost({ mediaUrl: url, caption: ngo.name, likes: 0, likedBy: [], createdAt: null, postId: `gallery-${index}` })}
+                        onClick={() =>
+                          setSelectedPost({
+                            mediaUrl: url,
+                            caption: ngo.name,
+                            likes: 0,
+                            likedBy: [],
+                            createdAt: null,
+                            postId: `gallery-${index}`,
+                          })
+                        }
                         className="aspect-square overflow-hidden rounded-xl"
                       >
                         <img src={url} alt={`Gallery ${index + 1}`} className="h-full w-full object-cover" />
@@ -369,6 +416,28 @@ export default function NGODetailPage() {
                 <img src={ngo.coverUrl} alt="About" className="w-full rounded-2xl object-cover h-40" />
               ) : null}
               <p className="text-sm leading-6 text-muted">{ngo.description}</p>
+
+              {/* Address with directions link */}
+              {ngo.address ? (
+                <button
+                  type="button"
+                  onClick={handleDirections}
+                  className="w-full rounded-2xl border border-slate-200 p-4 text-left flex items-start gap-3 hover:border-accent transition-colors"
+                >
+                  <MapPin className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-navy">Address — tap to get directions</p>
+                    <p className="text-sm text-muted mt-0.5">{ngo.address}</p>
+                    {hasCoords ? (
+                      <p className="text-xs text-muted mt-1">
+                        {Number(ngo.lat).toFixed(5)}, {Number(ngo.lng).toFixed(5)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Navigation className="h-4 w-4 text-accent shrink-0 ml-auto mt-0.5" />
+                </button>
+              ) : null}
+
               <div className="space-y-3 rounded-2xl bg-cream p-4 text-sm">
                 {ngo.foundedYear ? (
                   <p className="flex justify-between">
@@ -382,14 +451,18 @@ export default function NGODetailPage() {
                     <span className="font-semibold text-navy">{ngo.capacity}</span>
                   </p>
                 ) : null}
-                <p className="flex justify-between">
-                  <span className="text-muted">UPI ID</span>
-                  <span className="font-semibold text-navy">{ngo.upiId || 'Not set'}</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-muted">80G</span>
-                  <span className="font-semibold text-navy">{ngo.section80G || 'Pending'}</span>
-                </p>
+                {ngo.upiId ? (
+                  <p className="flex justify-between">
+                    <span className="text-muted">UPI ID</span>
+                    <span className="font-semibold text-navy font-mono">{ngo.upiId}</span>
+                  </p>
+                ) : null}
+                {ngo.section80G ? (
+                  <p className="flex justify-between">
+                    <span className="text-muted">80G</span>
+                    <span className="font-semibold text-navy">{ngo.section80G}</span>
+                  </p>
+                ) : null}
                 {ngo.facilities ? (
                   <div>
                     <p className="text-muted mb-1">Facilities</p>
@@ -405,6 +478,7 @@ export default function NGODetailPage() {
                   </p>
                 ) : null}
               </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
