@@ -1,14 +1,37 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { HeartHandshake, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { HeartHandshake, Mail, Lock, User, Eye, EyeOff, MapPin, Calendar, ChevronDown } from 'lucide-react';
 import { googleSignIn, registerDonor } from '../../services/authService';
 import { useAuth } from '../../hooks/useAuth';
 import { getRouteForRole } from '../../utils/navigation';
 
+const indianStates = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
+  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Puducherry', 'Chandigarh',
+];
+
+const steps = ['Account', 'Personal', 'Location'];
+
 export default function RegisterPage() {
   const navigate = useNavigate();
   const { role, refreshProfile } = useAuth();
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    dateOfBirth: '',
+    anniversaryDate: '',
+    phone: '',
+    city: '',
+    state: '',
+    pincode: '',
+  });
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
@@ -20,18 +43,39 @@ export default function RegisterPage() {
 
   const handleChange = (event) => {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+    setError('');
+  };
+
+  const validateStep = () => {
+    if (step === 0) {
+      if (!form.name.trim()) { setError('Please enter your name.'); return false; }
+      if (!form.email.trim()) { setError('Please enter your email.'); return false; }
+      if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return false; }
+      if (form.password !== form.confirmPassword) { setError('Passwords do not match.'); return false; }
+    }
+    if (step === 1) {
+      if (!form.dateOfBirth) { setError('Date of birth is required.'); return false; }
+      const dob = new Date(form.dateOfBirth);
+      const age = new Date().getFullYear() - dob.getFullYear();
+      if (age < 5 || age > 120) { setError('Please enter a valid date of birth.'); return false; }
+    }
+    if (step === 2) {
+      if (!form.city.trim()) { setError('Please enter your city.'); return false; }
+      if (!form.state) { setError('Please select your state.'); return false; }
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (validateStep()) {
+      setStep((s) => s + 1);
+      setError('');
+    }
   };
 
   const handleRegister = async (event) => {
     event.preventDefault();
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
+    if (!validateStep()) return;
     setLoading(true);
     setError('');
     try {
@@ -63,10 +107,14 @@ export default function RegisterPage() {
     }
   };
 
+  const today = new Date().toISOString().split('T')[0];
+  const maxDob = new Date();
+  maxDob.setFullYear(maxDob.getFullYear() - 5);
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-navy px-4 py-10">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-accent/20 text-accent mb-4">
             <HeartHandshake className="h-8 w-8" />
           </div>
@@ -74,107 +122,203 @@ export default function RegisterPage() {
           <p className="mt-2 text-sm text-white/60">Start giving food, medicine, and care</p>
         </div>
 
+        {/* Step indicator */}
+        <div className="flex items-center justify-center gap-3 mb-6">
+          {steps.map((s, i) => (
+            <div key={s} className="flex items-center gap-2">
+              <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-all ${
+                i < step ? 'bg-emerald-500 text-white' :
+                i === step ? 'bg-accent text-white' :
+                'bg-white/20 text-white/50'
+              }`}>
+                {i < step ? '✓' : i + 1}
+              </div>
+              <span className={`text-xs font-semibold ${i === step ? 'text-white' : 'text-white/40'}`}>{s}</span>
+              {i < steps.length - 1 ? <div className={`h-px w-6 ${i < step ? 'bg-emerald-500' : 'bg-white/20'}`} /> : null}
+            </div>
+          ))}
+        </div>
+
         <div className="rounded-[28px] bg-white p-6 shadow-2xl">
-          <button
-            type="button"
-            onClick={handleGoogleRegister}
-            disabled={googleLoading}
-            className="flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border-2 border-slate-200 text-sm font-bold text-navy hover:bg-slate-50 transition-colors disabled:opacity-70"
-          >
-            {googleLoading ? (
-              <div className="h-5 w-5 rounded-full border-2 border-navy border-t-transparent animate-spin" />
-            ) : (
-              <svg className="h-5 w-5" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-              </svg>
-            )}
-            {googleLoading ? 'Signing up...' : 'Continue with Google'}
-          </button>
 
-          <div className="my-5 flex items-center gap-3">
-            <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-xs text-muted font-semibold">or register with email</span>
-            <div className="flex-1 h-px bg-slate-200" />
-          </div>
-
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div className="relative">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-              <input
-                type="text"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                placeholder="Your full name"
-                required
-                className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent transition-colors"
-              />
-            </div>
-            <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="Email address"
-                required
-                className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent transition-colors"
-              />
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                placeholder="Password (min 6 characters)"
-                required
-                className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-12 text-sm outline-none focus:border-accent transition-colors"
-              />
+          {/* Google sign in — only on step 0 */}
+          {step === 0 ? (
+            <>
               <button
                 type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-muted"
+                onClick={handleGoogleRegister}
+                disabled={googleLoading}
+                className="flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border-2 border-slate-200 text-sm font-bold text-navy hover:bg-slate-50 transition-colors disabled:opacity-70"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {googleLoading ? (
+                  <div className="h-5 w-5 rounded-full border-2 border-navy border-t-transparent animate-spin" />
+                ) : (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                  </svg>
+                )}
+                {googleLoading ? 'Signing up...' : 'Continue with Google'}
               </button>
+              <div className="my-4 flex items-center gap-3">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-xs text-muted font-semibold">or register with email</span>
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+            </>
+          ) : null}
+
+          {/* Step 0: Account details */}
+          {step === 0 ? (
+            <div className="space-y-4">
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+                <input type="text" name="name" value={form.name} onChange={handleChange} placeholder="Your full name" required className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent" />
+              </div>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+                <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="Email address" required className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent" />
+              </div>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+                <input type={showPassword ? 'text' : 'password'} name="password" value={form.password} onChange={handleChange} placeholder="Password (min 6 characters)" required className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-12 text-sm outline-none focus:border-accent" />
+                <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted">
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+                <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Confirm password" required className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent" />
+              </div>
             </div>
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+          ) : null}
+
+          {/* Step 1: Personal details */}
+          {step === 1 ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-accent/5 border border-accent/20 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Calendar className="h-5 w-5 text-accent" />
+                  <p className="text-sm font-bold text-navy">Date of birth <span className="text-rose-500">*</span></p>
+                </div>
+                <input
+                  type="date"
+                  name="dateOfBirth"
+                  value={form.dateOfBirth}
+                  onChange={handleChange}
+                  max={maxDob.toISOString().split('T')[0]}
+                  required
+                  className="min-h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent bg-white"
+                />
+                <p className="mt-2 text-xs text-muted">🎂 We'll send you a birthday reminder to celebrate with kindness!</p>
+              </div>
+
+              <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">💍</span>
+                  <div>
+                    <p className="text-sm font-bold text-navy">Marriage anniversary</p>
+                    <p className="text-xs text-muted">Optional — we'll remind you to celebrate with a donation</p>
+                  </div>
+                </div>
+                <input
+                  type="date"
+                  name="anniversaryDate"
+                  value={form.anniversaryDate}
+                  onChange={handleChange}
+                  max={today}
+                  className="min-h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent bg-white"
+                />
+              </div>
+
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm">📱</span>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={form.phone}
+                  onChange={handleChange}
+                  placeholder="Phone number (optional)"
+                  className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {/* Step 2: Location */}
+          {step === 2 ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <MapPin className="h-5 w-5 text-accent" />
+                <p className="text-sm font-bold text-navy">Where are you from?</p>
+              </div>
+              <p className="text-xs text-muted -mt-2">Helps us show you nearby NGOs first.</p>
+
               <input
-                type="password"
-                name="confirmPassword"
-                value={form.confirmPassword}
+                type="text"
+                name="city"
+                value={form.city}
                 onChange={handleChange}
-                placeholder="Confirm password"
+                placeholder="City *"
                 required
-                className="min-h-12 w-full rounded-2xl border border-slate-200 pl-11 pr-4 text-sm outline-none focus:border-accent transition-colors"
+                className="min-h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
+              />
+
+              <div className="relative">
+                <select
+                  name="state"
+                  value={form.state}
+                  onChange={handleChange}
+                  required
+                  className="min-h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-accent appearance-none bg-white"
+                >
+                  <option value="">Select state *</option>
+                  {indianStates.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none" />
+              </div>
+
+              <input
+                type="text"
+                name="pincode"
+                value={form.pincode}
+                onChange={handleChange}
+                placeholder="Pincode (optional)"
+                maxLength={6}
+                className="min-h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
               />
             </div>
+          ) : null}
 
-            {error ? (
-              <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+          {error ? (
+            <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+          ) : null}
+
+          <div className="mt-5 space-y-3">
+            {step < 2 ? (
+              <button type="button" onClick={handleNext} className="min-h-12 w-full rounded-2xl bg-accent text-sm font-bold text-white">
+                Continue →
+              </button>
+            ) : (
+              <button type="button" onClick={handleRegister} disabled={loading} className="min-h-12 w-full rounded-2xl bg-accent text-sm font-bold text-white disabled:opacity-70">
+                {loading ? 'Creating account...' : '🎉 Create Account'}
+              </button>
+            )}
+
+            {step > 0 ? (
+              <button type="button" onClick={() => { setStep((s) => s - 1); setError(''); }} className="min-h-12 w-full rounded-2xl border border-slate-200 text-sm font-semibold text-navy">
+                ← Back
+              </button>
             ) : null}
+          </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="min-h-12 w-full rounded-2xl bg-accent text-sm font-bold text-white disabled:opacity-70"
-            >
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-          </form>
-
-          <p className="mt-5 text-center text-sm text-muted">
+          <p className="mt-4 text-center text-sm text-muted">
             Already have an account?{' '}
-            <Link to="/login" className="font-bold text-accent">
-              Sign in
-            </Link>
+            <Link to="/login" className="font-bold text-accent">Sign in</Link>
           </p>
         </div>
       </div>

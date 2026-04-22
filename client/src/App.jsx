@@ -1,9 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react'; // already includes useEffect
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import BottomNav from './components/BottomNav';
 import OfflineBanner from './components/OfflineBanner';
+import NotificationPrompt from './components/NotificationPrompt';
+import { onForegroundMessage } from './services/fcmService'; // ✅ ADDED
 import { useAuth } from './hooks/useAuth';
 import { getRouteForRole } from './utils/navigation';
 import LoginPage from './pages/auth/LoginPage';
@@ -75,6 +77,10 @@ function AppLayout({ children }) {
       <Navbar />
       {!online ? <OfflineBanner /> : null}
       {children}
+
+      {/* Notification Prompt */}
+      {showBottomNav ? <NotificationPrompt /> : null}
+
       {showBottomNav ? <BottomNav /> : null}
     </>
   );
@@ -83,6 +89,23 @@ function AppLayout({ children }) {
 export default function App() {
   const location = useLocation();
   const { role, loading } = useAuth();
+
+  // ✅ Step 7 — Foreground Notification Toast
+  useEffect(() => {
+    const unsubscribe = onForegroundMessage((payload) => {
+      const { title, body } = payload.notification || {};
+      if (title) {
+        const toast = document.createElement('div');
+        toast.innerHTML = `<div style="position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#1A1A2E;color:white;padding:12px 20px;border-radius:16px;z-index:9999;max-width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);border:1px solid rgba(255,107,53,0.3)">
+          <p style="font-weight:700;font-size:14px;margin:0 0 4px">${title}</p>
+          <p style="font-size:12px;opacity:0.7;margin:0">${body || ''}</p>
+        </div>`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   return (
     <AppLayout>

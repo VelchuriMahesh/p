@@ -9,7 +9,7 @@ import {
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
 
-export const ensureUserDocument = async (user, fallbackName = null) => {
+export const ensureUserDocument = async (user, fallbackName = null, extraData = {}) => {
   const userRef = doc(db, 'users', user.uid);
   const snapshot = await getDoc(userRef);
 
@@ -29,6 +29,15 @@ export const ensureUserDocument = async (user, fallbackName = null) => {
     totalDeliveries: 0,
     streakDays: 0,
     lastHabitDate: null,
+    dateOfBirth: extraData.dateOfBirth || null,
+    anniversaryDate: extraData.anniversaryDate || null,
+    phone: extraData.phone || null,
+    city: extraData.city || null,
+    state: extraData.state || null,
+    pincode: extraData.pincode || null,
+    fcmToken: null,
+    birthdayNotified: null,
+    anniversaryNotified: null,
   };
 
   await Promise.all([
@@ -59,29 +68,32 @@ export const loginWithEmail = async ({ email, password }) => {
   return { user: credential.user, role };
 };
 
-export const registerDonor = async ({ name, email, password }) => {
+export const registerDonor = async ({ name, email, password, dateOfBirth, anniversaryDate, phone, city, state, pincode }) => {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(credential.user, { displayName: name });
-  const profile = await ensureUserDocument(credential.user, name);
+  const profile = await ensureUserDocument(credential.user, name, {
+    dateOfBirth: dateOfBirth || null,
+    anniversaryDate: anniversaryDate || null,
+    phone: phone || null,
+    city: city || null,
+    state: state || null,
+    pincode: pincode || null,
+  });
   return { user: credential.user, role: profile.role };
 };
 
 export const googleSignIn = async () => {
   const credential = await signInWithPopup(auth, googleProvider);
   const existingRole = await resolveRole(credential.user.uid);
-
   if (existingRole && existingRole !== 'donor') {
     return { user: credential.user, role: existingRole };
   }
-
   const profile = await ensureUserDocument(
     credential.user,
     credential.user.displayName || credential.user.email?.split('@')[0]
   );
-
   return { user: credential.user, role: profile.role };
 };
 
 export const logout = () => signOut(auth);
 export { GoogleAuthProvider };
-
