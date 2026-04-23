@@ -11,6 +11,7 @@ import {
 import { db, auth } from './firebase';
 import { uploadImageToImgBB } from '../utils/uploadImage';
 import { v4 as uuidv4 } from 'uuid';
+import { notifyDeliverySubmitted } from './notificationService';
 
 export const submitDelivery = async (formData) => {
   const user = auth.currentUser;
@@ -32,13 +33,14 @@ export const submitDelivery = async (formData) => {
 
   const proofImageUrl = await uploadImageToImgBB(proofImageFile);
   const deliveryId = uuidv4();
+  const ngoData = ngoSnap.data();
 
   await setDoc(doc(db, 'deliveries', deliveryId), {
     deliveryId,
     donorUid: user.uid,
     donorName: donorName || user.displayName || user.email,
     ngoId,
-    ngoName: ngoSnap.data().name,
+    ngoName: ngoData.name,
     needId,
     itemsDelivered,
     proofImageUrl,
@@ -57,6 +59,23 @@ export const submitDelivery = async (formData) => {
     await updateHabitStreak(user.uid);
   } catch (e) {
     console.warn('Streak update failed:', e);
+  }
+
+  try {
+    const ngoAdminSnap = await getDocs(
+      query(collection(db, 'users'), where('ngoId', '==', ngoId), where('role', '==', 'ngo_admin'))
+    );
+    const ngoAdminUid = ngoAdminSnap.docs[0]?.data()?.uid;
+    if (ngoAdminUid) {
+      await notifyDeliverySubmitted({
+        ngoAdminUid,
+        donorName: donorName || user.displayName || 'A donor',
+        items: itemsDelivered,
+        ngoName: ngoData.name,
+      });
+    }
+  } catch (e) {
+    console.warn('Notification failed:', e);
   }
 
   return { deliveryId, status: 'pending' };

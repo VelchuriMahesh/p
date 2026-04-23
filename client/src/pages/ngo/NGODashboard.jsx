@@ -3,15 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { fetchNgoDonations, fetchNgoDeliveries, fetchMyNgoProfile } from '../../services/ngoAdminService';
 import { formatCurrency, formatDate } from '../../utils/date';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Bell, CheckCircle2, Clock, TrendingUp, Award, Package, Heart, ChevronRight } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, TrendingUp, Award, Package, Heart, ChevronRight, X } from 'lucide-react';
+import { useNotifications } from '../../hooks/useNotifications';
+import { markNotificationAsRead, markAllAsRead } from '../../services/notificationService';
+import { useAuth } from '../../hooks/useAuth';
+import { formatDateTime } from '../../utils/date';
 
 export default function NGODashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [ngo, setNgo] = useState(null);
   const [donations, setDonations] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [showNotifications, setShowNotifications] = useState(false);
+  const { notifications, unreadCount } = useNotifications();
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -48,10 +54,64 @@ export default function NGODashboard() {
     return Object.entries(map).map(([date, amount]) => ({ date, amount })).slice(-7);
   }, [verifiedDonations]);
 
-  const hasNotifications = pendingDonations.length > 0 || pendingDeliveries.length > 0;
-
   return (
     <div className="mx-auto max-w-md space-y-4 px-4 py-5">
+
+      {/* Notification panel */}
+      {showNotifications ? (
+        <div className="fixed inset-0 z-50 bg-black/50" onClick={() => setShowNotifications(false)}>
+          <div
+            className="absolute right-0 top-0 bottom-0 w-80 bg-white shadow-2xl overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-4 flex items-center justify-between">
+              <div>
+                <p className="text-base font-bold text-navy">Notifications</p>
+                {unreadCount > 0 ? <p className="text-xs text-muted">{unreadCount} unread</p> : null}
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => user && markAllAsRead(user.uid)}
+                    className="text-xs font-semibold text-accent"
+                  >
+                    Mark all read
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => setShowNotifications(false)} className="text-muted">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-3 space-y-2">
+              {notifications.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted">No notifications yet.</div>
+              ) : null}
+              {notifications.map((notification) => (
+                <button
+                  key={notification.notifId}
+                  type="button"
+                  onClick={async () => {
+                    if (!notification.read) await markNotificationAsRead(notification.notifId);
+                    setShowNotifications(false);
+                    if (notification.link) navigate(notification.link);
+                  }}
+                  className={`w-full rounded-2xl border p-3 text-left ${
+                    notification.read ? 'bg-white border-slate-100' : 'bg-accent/5 border-accent/20'
+                  }`}
+                >
+                  <p className={`text-sm ${notification.read ? 'font-medium' : 'font-bold'} text-navy leading-tight`}>
+                    {notification.title}
+                  </p>
+                  <p className="text-xs text-muted mt-0.5 leading-4">{notification.body}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{formatDateTime(notification.createdAt)}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="rounded-[28px] bg-navy p-5 text-white shadow-card">
         <div className="flex items-start justify-between">
@@ -60,55 +120,55 @@ export default function NGODashboard() {
             <h1 className="mt-1 text-2xl font-bold text-white">{ngo?.name || 'Partner home'}</h1>
             <p className="mt-1 text-xs text-white/50">{ngo?.address}</p>
           </div>
-          {hasNotifications ? (
-            <div className="relative">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10">
-                <Bell className="h-5 w-5 text-amber-400" />
-              </div>
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-white">
-                {pendingDonations.length + pendingDeliveries.length}
+          <button
+            type="button"
+            onClick={() => setShowNotifications(true)}
+            className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/10"
+          >
+            <Bell className="h-5 w-5 text-white" />
+            {unreadCount > 0 ? (
+              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
               </span>
-            </div>
-          ) : null}
+            ) : null}
+          </button>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-white/10 p-4">
+            <Heart className="h-4 w-4 text-accent mb-2" />
+            <p className="text-2xl font-bold text-white">{formatCurrency(totalReceived)}</p>
             <p className="text-xs text-white/50">Total received</p>
-            <p className="mt-1 text-xl font-bold text-white">{formatCurrency(totalReceived)}</p>
-            <p className="mt-1 text-xs text-emerald-400">✓ {verifiedDonations.length} verified</p>
+            <p className="text-xs text-emerald-400 mt-1">{verifiedDonations.length} verified</p>
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
+            <Clock className="h-4 w-4 text-amber-400 mb-2" />
+            <p className="text-2xl font-bold text-white">{formatCurrency(totalPending)}</p>
             <p className="text-xs text-white/50">Pending amount</p>
-            <p className="mt-1 text-xl font-bold text-white">{formatCurrency(totalPending)}</p>
-            <p className="mt-1 text-xs text-amber-400">⏳ {pendingDonations.length} to review</p>
+            <p className="text-xs text-amber-400 mt-1">{pendingDonations.length} to review</p>
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
-            <p className="text-xs text-white/50">Deliveries pending</p>
-            <p className="mt-1 text-xl font-bold text-white">{pendingDeliveries.length}</p>
-            <p className="mt-1 text-xs text-white/40">awaiting approval</p>
+            <Package className="h-4 w-4 text-blue-400 mb-2" />
+            <p className="text-2xl font-bold text-white">{pendingDeliveries.length}</p>
+            <p className="text-xs text-white/50">Pending deliveries</p>
           </div>
           <div className="rounded-2xl bg-white/10 p-4">
-            <p className="text-xs text-white/50">Total donors</p>
-            <p className="mt-1 text-xl font-bold text-white">{new Set(donations.map((d) => d.donorUid)).size}</p>
-            <p className="mt-1 text-xs text-white/40">unique supporters</p>
+            <Award className="h-4 w-4 text-accent mb-2" />
+            <p className="text-2xl font-bold text-white">
+              {new Set(donations.map((d) => d.donorUid)).size}
+            </p>
+            <p className="text-xs text-white/50">Unique donors</p>
           </div>
         </div>
       </section>
 
       {pendingDonations.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => navigate('/ngo-dashboard/donations')}
-          className="w-full rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left shadow-card flex items-center gap-3"
-        >
+        <button type="button" onClick={() => navigate('/ngo-dashboard/donations')} className="w-full rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left shadow-card flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
             <Bell className="h-5 w-5 text-amber-600" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-800">
-              {pendingDonations.length} donation{pendingDonations.length > 1 ? 's' : ''} need verification
-            </p>
+            <p className="text-sm font-semibold text-amber-800">{pendingDonations.length} donation{pendingDonations.length > 1 ? 's' : ''} need verification</p>
             <p className="text-xs text-amber-600">Tap to review and issue certificates</p>
           </div>
           <ChevronRight className="h-4 w-4 text-amber-600" />
@@ -116,18 +176,12 @@ export default function NGODashboard() {
       ) : null}
 
       {pendingDeliveries.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => navigate('/ngo-dashboard/deliveries')}
-          className="w-full rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left shadow-card flex items-center gap-3"
-        >
+        <button type="button" onClick={() => navigate('/ngo-dashboard/deliveries')} className="w-full rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left shadow-card flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
             <Package className="h-5 w-5 text-blue-600" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-semibold text-blue-800">
-              {pendingDeliveries.length} delivery{pendingDeliveries.length > 1 ? 'ies' : ''} need verification
-            </p>
+            <p className="text-sm font-semibold text-blue-800">{pendingDeliveries.length} deliver{pendingDeliveries.length > 1 ? 'ies' : 'y'} need verification</p>
             <p className="text-xs text-blue-600">Tap to review delivery proofs</p>
           </div>
           <ChevronRight className="h-4 w-4 text-blue-600" />
@@ -167,7 +221,7 @@ export default function NGODashboard() {
             type="button"
             key={item.path}
             onClick={() => navigate(item.path)}
-            className={`rounded-2xl ${item.color} px-4 py-5 text-left shadow-card relative overflow-hidden`}
+            className={`rounded-2xl ${item.color} px-4 py-5 text-left shadow-card`}
           >
             <span className="text-2xl">{item.icon}</span>
             <p className="mt-2 text-sm font-semibold text-navy">{item.label}</p>
@@ -176,16 +230,16 @@ export default function NGODashboard() {
         ))}
       </section>
 
-      {loading ? null : (
+      {!loading ? (
         <section className="rounded-[28px] bg-white p-5 shadow-card">
           <p className="text-sm font-semibold text-navy mb-3">Recent donations</p>
-          {donations.slice(0, 4).length === 0 ? (
+          {donations.slice(0, 5).length === 0 ? (
             <p className="text-sm text-muted text-center py-4">No donations yet.</p>
           ) : (
             <div className="space-y-3">
-              {donations.slice(0, 4).map((d) => (
+              {donations.slice(0, 5).map((d) => (
                 <div key={d.donationId} className="flex items-center gap-3">
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                     d.status === 'verified' ? 'bg-emerald-100 text-emerald-700' :
                     d.status === 'pending' ? 'bg-amber-100 text-amber-700' :
                     'bg-rose-100 text-rose-700'
@@ -208,7 +262,7 @@ export default function NGODashboard() {
             </div>
           )}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

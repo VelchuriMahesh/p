@@ -1,6 +1,7 @@
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { v4 as uuidv4 } from 'uuid';
+import { notifyCertificateIssued } from './notificationService';
 
 const generateCertificateHtml = ({ donorName, ngoName, type, amount, itemsDelivered, date, certificateId }) => {
   const verifyUrl = `${window.location.origin}/verify/${certificateId}`;
@@ -28,7 +29,6 @@ const generateCertificateHtml = ({ donorName, ngoName, type, amount, itemsDelive
   .meta{font-size:11px;color:#aaa;font-family:Arial,sans-serif;line-height:2.2;}
   .verify{margin-top:12px;font-size:10px;color:#FF6B35;font-family:Arial,sans-serif;word-break:break-all;}
   .footer{margin-top:24px;font-size:11px;color:#ccc;font-family:Arial,sans-serif;}
-  @media print{body{background:white;}.cert{box-shadow:none;border-color:#FF6B35;}}
 </style>
 </head>
 <body>
@@ -70,26 +70,33 @@ export const issueCertificate = async ({ type, record }) => {
     certificateId,
   });
 
-  const blob = new Blob([html], { type: 'text/html' });
-  const certificateUrl = URL.createObjectURL(blob);
+  const storedHtml = btoa(unescape(encodeURIComponent(html)));
+  const certificateUrl = `data:text/html;base64,${storedHtml}`;
 
   const collectionName = type === 'donation' ? 'donations' : 'deliveries';
   const docId = type === 'donation' ? record.donationId : record.deliveryId;
 
-  const storedHtml = btoa(unescape(encodeURIComponent(html)));
-  const storageUrl = `data:text/html;base64,${storedHtml}`;
-
   await updateDoc(doc(db, collectionName, docId), {
     certificateId,
-    certificateUrl: storageUrl,
-    certificateHtml: html,
+    certificateUrl,
     verifiedAt: serverTimestamp(),
   });
+
+  try {
+    await notifyCertificateIssued({
+      donorUid: record.donorUid,
+      ngoName: record.ngoName,
+      type,
+    });
+  } catch (e) {
+    console.warn('Certificate notification failed:', e);
+  }
 
   return { certificateId, certificateUrl };
 };
 
 export const openCertificate = (certificateUrl) => {
+  if (!certificateUrl) return;
   if (certificateUrl.startsWith('data:text/html;base64,')) {
     const base64 = certificateUrl.replace('data:text/html;base64,', '');
     const html = decodeURIComponent(escape(atob(base64)));

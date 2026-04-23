@@ -1,121 +1,174 @@
 import {
-  arrayRemove,
-  arrayUnion,
   collection,
   doc,
-  getCountFromServer,
   getDoc,
   getDocs,
+  query,
+  where,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
   increment,
   orderBy,
-  query,
-  updateDoc,
-  where,
+  limit
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { calculateDistanceKm } from '../utils/location';
+
+const toRad = (val) => (val * Math.PI) / 180;
+
+const calculateDistanceKm = (from, to) => {
+  if (!from?.lat || !from?.lng || !to?.lat || !to?.lng) return 9999;
+  const R = 6371;
+  const dLat = toRad(Number(to.lat) - Number(from.lat));
+  const dLon = toRad(Number(to.lng) - Number(from.lng));
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(Number(from.lat))) *
+      Math.cos(toRad(Number(to.lat))) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 export const fetchActiveNGOs = async () => {
-  const snapshot = await getDocs(query(collection(db, 'ngos'), where('isActive', '==', true), orderBy('createdAt', 'desc')));
-  return snapshot.docs.map((item) => item.data());
+  try {
+    const snap = await getDocs(query(collection(db, 'ngos'), where('isActive', '==', true)));
+    return snap.docs.map((d) => d.data());
+  } catch (error) {
+    console.error('fetchActiveNGOs error:', error);
+    return [];
+  }
 };
 
 export const fetchNgoById = async (ngoId) => {
-  const snapshot = await getDoc(doc(db, 'ngos', ngoId));
-  return snapshot.exists() ? snapshot.data() : null;
+  try {
+    const snap = await getDoc(doc(db, 'ngos', ngoId));
+    return snap.exists() ? snap.data() : null;
+  } catch (error) {
+    console.error('fetchNgoById error:', error);
+    return null;
+  }
 };
 
-export const fetchNgoNeeds = async (ngoId, { includeInactive = false } = {}) => {
-  const snapshot = await getDocs(
-    query(collection(db, 'needs'), where('ngoId', '==', ngoId), orderBy('createdAt', 'desc'))
-  );
-  const needs = snapshot.docs.map((item) => item.data());
-  return includeInactive ? needs : needs.filter((need) => need.isActive);
+export const fetchSuggestedNGOs = async (location) => {
+  try {
+    const snap = await getDocs(query(collection(db, 'ngos'), where('isActive', '==', true)));
+    const list = snap.docs.map((d) => d.data());
+    if (location) {
+      return [...list].sort(
+        (a, b) =>
+          calculateDistanceKm(location, { lat: a.lat, lng: a.lng }) -
+          calculateDistanceKm(location, { lat: b.lat, lng: b.lng })
+      );
+    }
+    return list;
+  } catch (error) {
+    console.error('fetchSuggestedNGOs error:', error);
+    return [];
+  }
+};
+
+export const fetchNgoNeeds = async (ngoId) => {
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'needs'), where('ngoId', '==', ngoId), where('isActive', '==', true))
+    );
+    return snap.docs
+      .map((d) => d.data())
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  } catch (error) {
+    console.error('fetchNgoNeeds error:', error);
+    return [];
+  }
 };
 
 export const fetchNgoPosts = async (ngoId) => {
-  const snapshot = await getDocs(
-    query(collection(db, 'posts'), where('ngoId', '==', ngoId), orderBy('createdAt', 'desc'))
-  );
-  return snapshot.docs.map((item) => item.data());
-};
-
-export const fetchUrgentNeeds = async () => {
   try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, 'needs'),
-        where('isActive', '==', true)
-      )
-    );
-    const needs = snapshot.docs.map((item) => item.data());
-    return needs.filter((need) => ['high', 'medium'].includes(need.urgency));
+    const snap = await getDocs(query(collection(db, 'posts'), where('ngoId', '==', ngoId)));
+    return snap.docs
+      .map((d) => d.data())
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
   } catch (error) {
-    console.error('fetchUrgentNeeds error:', error);
+    console.error('fetchNgoPosts error:', error);
     return [];
   }
 };
 
 export const fetchRecentPosts = async () => {
   try {
-    const snapshot = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc')));
-    return snapshot.docs.map((item) => item.data());
+    const snap = await getDocs(collection(db, 'posts'));
+    return snap.docs
+      .map((d) => d.data())
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+      .slice(0, 30);
   } catch (error) {
     console.error('fetchRecentPosts error:', error);
     return [];
   }
 };
 
-export const fetchPlatformStats = async () => {
+export const fetchUrgentNeeds = async () => {
   try {
-    const [statsSnap, donorCountSnap] = await Promise.all([
-      getDoc(doc(db, 'stats', 'platform')),
-      getCountFromServer(query(collection(db, 'users'), where('role', '==', 'donor'))),
-    ]);
-
-    return {
-      totalMeals: statsSnap.exists() ? statsSnap.data().totalMeals || 0 : 0,
-      totalDonationsAmount: statsSnap.exists() ? statsSnap.data().totalDonationsAmount || 0 : 0,
-      totalDeliveries: statsSnap.exists() ? statsSnap.data().totalDeliveries || 0 : 0,
-      totalDonors: donorCountSnap.data().count,
-    };
+    const snap = await getDocs(
+      query(collection(db, 'needs'), where('isActive', '==', true), where('urgency', '==', 'high'))
+    );
+    const highPriority = snap.docs.map((d) => d.data());
+    if (highPriority.length > 0) return highPriority;
+    const allSnap = await getDocs(query(collection(db, 'needs'), where('isActive', '==', true)));
+    return allSnap.docs
+      .map((d) => d.data())
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+      .slice(0, 5);
   } catch (error) {
-    console.error('fetchPlatformStats error:', error);
-    return { totalMeals: 0, totalDonationsAmount: 0, totalDeliveries: 0, totalDonors: 0 };
+    console.error('fetchUrgentNeeds error:', error);
+    return [];
   }
 };
 
-export const fetchSuggestedNGOs = async (userCoordinates = null) => {
-  const ngos = await fetchActiveNGOs();
-
-  if (!userCoordinates) {
-    return ngos;
+export const fetchPlatformStats = async () => {
+  try {
+    const [donationsSnap, deliveriesSnap] = await Promise.all([
+      getDocs(query(collection(db, 'donations'), where('status', '==', 'verified'))),
+      getDocs(query(collection(db, 'deliveries'), where('status', '==', 'verified'))),
+    ]);
+    const totalDonated = donationsSnap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
+    const totalMeals = Math.round(totalDonated / 50) + deliveriesSnap.size * 2;
+    const donorUids = new Set(donationsSnap.docs.map((d) => d.data().donorUid));
+    return { totalMeals, totalDonors: donorUids.size };
+  } catch (error) {
+    return { totalMeals: 0, totalDonors: 0 };
   }
-
-  return [...ngos].sort((left, right) => {
-    const leftDistance = calculateDistanceKm(userCoordinates, { lat: left.lat, lng: left.lng });
-    const rightDistance = calculateDistanceKm(userCoordinates, { lat: right.lat, lng: right.lng });
-    return leftDistance - rightDistance;
-  });
 };
 
 export const togglePostLike = async ({ postId, userId, alreadyLiked }) => {
   const postRef = doc(db, 'posts', postId);
-
   await updateDoc(postRef, {
     likedBy: alreadyLiked ? arrayRemove(userId) : arrayUnion(userId),
     likes: increment(alreadyLiked ? -1 : 1),
   });
 };
 
+/** 
+ * FIX: Added this missing function to resolve the SyntaxError
+ */
 export const fetchLeaderboard = async () => {
   try {
-    const snapshot = await getDocs(
-      query(collection(db, 'leaderboard'), orderBy('totalDonated', 'desc'))
+    const snap = await getDocs(
+      query(
+        collection(db, 'users'),
+        where('role', '==', 'donor'),
+        orderBy('impactPoints', 'desc'),
+        limit(20)
+      )
     );
-    return snapshot.docs.map((item) => item.data());
+    return snap.docs.map((d) => d.data());
   } catch (error) {
     console.error('fetchLeaderboard error:', error);
-    return [];
+    // Fallback in case the composite index is not yet built in Firebase
+    const allSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'donor')));
+    return allSnap.docs
+      .map(d => d.data())
+      .sort((a, b) => (b.impactPoints || 0) - (a.impactPoints || 0))
+      .slice(0, 20);
   }
 };

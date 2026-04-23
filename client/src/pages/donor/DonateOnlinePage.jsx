@@ -1,86 +1,104 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Copy, Sparkles, QrCode } from 'lucide-react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Copy, QrCode, Smartphone, ArrowRight, Upload, X } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { fetchNgoById } from '../../services/ngoService';
 import { submitDonation } from '../../services/donationService';
 import { useAuth } from '../../hooks/useAuth';
 import { formatCurrency } from '../../utils/date';
 import { uploadImageToImgBB } from '../../utils/uploadImage';
 
-const suggestedAmounts = [10, 100, 300, 500];
+const SUGGESTED_AMOUNTS = [10, 100, 500];
+
+const generateUpiLink = (upiId, ngoName, amount) => {
+  if (!upiId || !amount) return null;
+  return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(ngoName)}&am=${amount}&cu=INR`;
+};
 
 export default function DonateOnlinePage() {
   const { ngoId } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { profile, user } = useAuth();
   const [ngo, setNgo] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [preview, setPreview] = useState(null);
+  const [selectedAmount, setSelectedAmount] = useState(null);
+  const [customAmount, setCustomAmount] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [step, setStep] = useState('select'); // 'select' | 'pay' | 'confirm'
+  const [copied, setCopied] = useState(false);
+  const [screenshot, setScreenshot] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [showCustom, setShowCustom] = useState(false);
-  const [form, setForm] = useState({
-    donorName: '',
-    amount: searchParams.get('amount') || '',
-    utr: '',
-    screenshot: null,
-  });
 
   useEffect(() => {
     fetchNgoById(ngoId).then(setNgo);
   }, [ngoId]);
 
-  useEffect(() => {
-    if (profile?.name || user?.displayName) {
-      setForm((current) => ({
-        ...current,
-        donorName: profile?.name || user?.displayName || '',
-      }));
-    }
-  }, [profile, user]);
+  const finalAmount = useMemo(() => {
+    if (showCustom) return Number(customAmount) > 0 ? Number(customAmount) : null;
+    return selectedAmount;
+  }, [showCustom, customAmount, selectedAmount]);
 
-  const upiText = useMemo(() => ngo?.upiId || '', [ngo]);
-  const qrUrl = useMemo(() => ngo?.qrCodeUrl || '', [ngo]);
+  const upiLink = useMemo(() => {
+    if (!ngo?.upiId || !finalAmount) return null;
+    return generateUpiLink(ngo.upiId, ngo.name, finalAmount);
+  }, [ngo, finalAmount]);
 
-  const handleChange = (event) => {
-    const { name, value, files } = event.target;
-    if (name === 'screenshot') {
-      const file = files?.[0] || null;
-      setForm((current) => ({ ...current, screenshot: file }));
-      setPreview(file ? URL.createObjectURL(file) : null);
-      return;
-    }
-    setForm((current) => ({ ...current, [name]: value }));
+  const handleAmountSelect = (amount) => {
+    setSelectedAmount(amount);
+    setShowCustom(false);
+    setCustomAmount('');
   };
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(upiText);
+  const handleCustomSelect = () => {
+    setSelectedAmount(null);
+    setShowCustom(true);
+  };
+
+  const handleCopyUpi = async () => {
+    if (!ngo?.upiId) return;
+    await navigator.clipboard.writeText(ngo.upiId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!form.screenshot) {
-      alert('Please upload a screenshot of the payment.');
+  const handleProceedToPay = () => {
+    if (!finalAmount) {
+      alert('Please select or enter a donation amount.');
       return;
     }
+    setStep('pay');
+  };
+
+  const handleOpenUpiApp = () => {
+    if (upiLink) {
+      window.location.href = upiLink;
+    }
+  };
+
+  const handleScreenshotChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setScreenshot(file);
+    setScreenshotPreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleIHavePaid = async () => {
     setLoading(true);
     try {
-      if (navigator.vibrate) navigator.vibrate(50);
-      const screenshotUrl = await uploadImageToImgBB(form.screenshot);
+      let screenshotUrl = null;
+      if (screenshot) {
+        screenshotUrl = await uploadImageToImgBB(screenshot);
+      }
+
       await submitDonation({
         ngoId,
-        donorName: form.donorName,
-        amount: form.amount,
-        utr: form.utr,
+        donorName: profile?.name || user?.displayName || 'Donor',
+        amount: finalAmount,
         screenshotUrl,
       });
+
       setSuccess(true);
     } catch (error) {
-      alert(error.message);
+      alert(error.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -89,7 +107,7 @@ export default function DonateOnlinePage() {
   if (!ngo) {
     return (
       <div className="mx-auto max-w-md px-4 py-8 text-center text-sm text-muted">
-        Loading...
+        <div className="skeleton h-64 rounded-[28px]" />
       </div>
     );
   }
@@ -97,16 +115,24 @@ export default function DonateOnlinePage() {
   if (success) {
     return (
       <div className="mx-auto max-w-md px-4 py-10">
-        <div className="rounded-[28px] bg-white p-6 text-center shadow-card">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-            <CheckCircle2 className="h-8 w-8" />
+        <div className="rounded-[28px] bg-white p-8 text-center shadow-card">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-6">
+            <CheckCircle2 className="h-10 w-10" />
           </div>
-          <h1 className="mt-5 text-2xl font-bold text-navy">Donation submitted!</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            Your payment proof is pending NGO verification. Once verified, your certificate will appear in your dashboard.
+          <h1 className="text-2xl font-extrabold text-navy">Thank you! 🎉</h1>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Your donation of <span className="font-bold text-accent">{formatCurrency(finalAmount)}</span> to <span className="font-semibold text-navy">{ngo.name}</span> has been recorded.
           </p>
-          <button type="button" onClick={() => navigate('/dashboard')} className="mt-6 min-h-12 w-full rounded-xl bg-accent text-sm font-bold text-white">
-            Go to Dashboard
+          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3 text-left">
+            <p className="text-xs font-semibold text-amber-800">⏳ Pending verification</p>
+            <p className="text-xs text-amber-700 mt-0.5">The NGO will manually verify your payment and issue your certificate once approved.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            className="mt-6 min-h-12 w-full rounded-2xl bg-accent text-sm font-bold text-white"
+          >
+            View My Dashboard
           </button>
         </div>
       </div>
@@ -115,174 +141,305 @@ export default function DonateOnlinePage() {
 
   return (
     <div className="page-shell">
-      <div className="mx-auto max-w-md space-y-5 px-4 py-5">
-        <section className="rounded-[28px] bg-white p-5 shadow-card">
+      <div className="mx-auto max-w-md space-y-4 px-4 py-5">
+
+        {/* NGO Header */}
+        <section className="rounded-[28px] bg-navy p-5 text-white shadow-card">
           <div className="flex items-center gap-3 mb-4">
             {ngo.logoUrl ? (
-              <img src={ngo.logoUrl} alt={ngo.name} className="h-12 w-12 rounded-2xl object-cover" />
-            ) : null}
-            <div>
-              <p className="text-xs text-muted">Donating to</p>
-              <p className="text-base font-bold text-navy">{ngo.name}</p>
-            </div>
-          </div>
-
-          <h1 className="text-2xl font-bold text-navy">Donate online</h1>
-
-          {/* QR Code section */}
-          <div className="mt-5 overflow-hidden rounded-[24px] bg-cream p-4 flex items-center justify-center min-h-48">
-            {qrUrl ? (
-              <div className="text-center">
-                <img
-                  src={qrUrl}
-                  alt="UPI QR Code"
-                  className="mx-auto h-56 w-56 rounded-2xl bg-white object-contain p-2 shadow-card"
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-                <p className="mt-3 text-xs font-semibold text-muted">Scan with any UPI app — GPay, PhonePe, Paytm</p>
-              </div>
-            ) : upiText ? (
-              <div className="text-center space-y-3">
-                <QrCode className="h-16 w-16 text-muted mx-auto" />
-                <p className="text-sm font-semibold text-navy">Use UPI ID to pay</p>
-                <p className="font-mono text-base font-bold text-accent">{upiText}</p>
-                <p className="text-xs text-muted">Copy the UPI ID and pay in any UPI app</p>
-              </div>
+              <img src={ngo.logoUrl} alt={ngo.name} className="h-14 w-14 rounded-2xl object-cover border-2 border-white/20" />
             ) : (
-              <div className="flex flex-col items-center justify-center gap-3 text-center px-4">
-                <QrCode className="h-12 w-12 text-muted" />
-                <p className="text-sm text-muted">Payment details not configured yet.</p>
-                <p className="text-xs text-muted">Contact the NGO or platform admin.</p>
-              </div>
+              <div className="h-14 w-14 rounded-2xl bg-white/10 flex items-center justify-center text-2xl">🏠</div>
             )}
-          </div>
-
-          {upiText ? (
-            <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted">UPI ID</p>
-                <p className="text-sm font-bold text-navy font-mono">{upiText}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className={`flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-bold transition ${copied ? 'bg-emerald-600 text-white' : 'bg-navy text-white'}`}
-              >
-                <Copy className="h-4 w-4" />
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
+            <div>
+              <p className="text-xs text-white/60 uppercase tracking-wide font-semibold">Donating to</p>
+              <p className="text-lg font-extrabold text-white">{ngo.name}</p>
             </div>
-          ) : null}
-
-          {/* Amount selector */}
-          <div className="mt-5">
-            <p className="text-xs font-bold uppercase tracking-wide text-muted mb-3">Select amount</p>
-            <div className="flex flex-wrap gap-2">
-              {suggestedAmounts.map((amount) => (
-                <button
-                  type="button"
-                  key={amount}
-                  onClick={() => { setForm((current) => ({ ...current, amount: amount.toString() })); setShowCustom(false); }}
-                  className={`rounded-full px-4 py-2 text-sm font-bold transition ${
-                    Number(form.amount) === amount && !showCustom ? 'bg-accent text-white shadow-card' : 'bg-cream text-navy'
-                  }`}
-                >
-                  {formatCurrency(amount)}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => { setShowCustom(true); setForm((current) => ({ ...current, amount: '' })); }}
-                className={`rounded-full px-4 py-2 text-sm font-bold transition ${showCustom ? 'bg-accent text-white' : 'bg-cream text-navy'}`}
-              >
-                Custom
-              </button>
-            </div>
-            {showCustom ? (
-              <input
-                type="number"
-                placeholder="Enter custom amount (₹)"
-                value={form.amount}
-                onChange={(e) => setForm((current) => ({ ...current, amount: e.target.value }))}
-                className="mt-3 min-h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
-                min="1"
-                autoFocus
-              />
-            ) : null}
           </div>
-
-          <ol className="mt-5 space-y-2 rounded-2xl bg-cream p-4 text-sm leading-6 text-muted">
-            <li className="flex gap-2"><span className="font-bold text-accent">1.</span> Scan the QR code or copy the UPI ID.</li>
-            <li className="flex gap-2"><span className="font-bold text-accent">2.</span> Complete the payment in your UPI app (GPay, PhonePe, Paytm etc).</li>
-            <li className="flex gap-2"><span className="font-bold text-accent">3.</span> Come back here and submit your UTR with a screenshot.</li>
-          </ol>
-
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="mt-5 min-h-12 w-full rounded-xl bg-accent text-sm font-bold text-white flex items-center justify-center gap-2"
-          >
-            <Sparkles className="h-4 w-4" />
-            I Have Donated — Submit Proof
-          </button>
+          <div className="rounded-2xl bg-white/10 px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-white/50 font-semibold">Zero charges</p>
+              <p className="text-xs font-semibold text-white/80">100% goes to the NGO via UPI</p>
+            </div>
+            <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-3 py-1 text-xs font-bold text-emerald-300">Free</span>
+          </div>
         </section>
 
-        {showForm ? (
-          <form onSubmit={handleSubmit} className="rounded-[28px] bg-white p-5 shadow-card">
-            <h2 className="text-lg font-bold text-navy">Submit proof of payment</h2>
-            <p className="mt-1 text-sm text-muted">Enter your UTR and upload a screenshot to complete.</p>
-            <div className="mt-4 space-y-4">
-              <input
-                type="text"
-                name="donorName"
-                value={form.donorName}
-                onChange={handleChange}
-                placeholder="Your name"
-                required
-                className="min-h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
-              />
-              <input
-                type="number"
-                name="amount"
-                value={form.amount}
-                onChange={handleChange}
-                placeholder="Amount paid (₹)"
-                required
-                min="1"
-                className="min-h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
-              />
-              <input
-                type="text"
-                name="utr"
-                value={form.utr}
-                onChange={handleChange}
-                placeholder="UTR / Transaction ID (min 12 characters)"
-                required
-                minLength={12}
-                className="min-h-12 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:border-accent"
-              />
-              <label className="block">
-                <span className="text-sm font-semibold text-navy">Payment screenshot</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  name="screenshot"
-                  onChange={handleChange}
-                  required
-                  className="mt-2 block w-full rounded-xl border border-slate-200 px-4 py-3 text-sm"
-                />
-              </label>
-              {preview ? <img src={preview} alt="Screenshot preview" className="h-52 w-full rounded-2xl object-cover" /> : null}
+        {/* Step 1: Amount Selection */}
+        {step === 'select' ? (
+          <section className="rounded-[28px] bg-white p-5 shadow-card space-y-5">
+            <div>
+              <h2 className="text-xl font-extrabold text-navy">Choose amount</h2>
+              <p className="text-sm text-muted mt-1">Every rupee directly feeds an elder in need.</p>
             </div>
+
+            {/* Amount buttons */}
+            <div className="grid grid-cols-3 gap-3">
+              {SUGGESTED_AMOUNTS.map((amount) => (
+                <button
+                  key={amount}
+                  type="button"
+                  onClick={() => handleAmountSelect(amount)}
+                  className={`relative rounded-2xl py-4 text-center font-bold transition-all ${
+                    selectedAmount === amount && !showCustom
+                      ? 'bg-accent text-white shadow-lg shadow-accent/30 scale-105'
+                      : 'bg-cream text-navy border border-slate-200'
+                  }`}
+                >
+                  <p className={`text-lg ${selectedAmount === amount && !showCustom ? 'text-white' : 'text-accent'}`}>
+                    ₹{amount}
+                  </p>
+                  <p className={`text-[10px] mt-0.5 ${selectedAmount === amount && !showCustom ? 'text-white/70' : 'text-muted'}`}>
+                    {amount === 10 ? '~1 meal' : amount === 100 ? '~2 days' : '~10 days'}
+                  </p>
+                </button>
+              ))}
+            </div>
+
+            {/* Custom amount */}
             <button
-              type="submit"
-              disabled={loading}
-              className="mt-5 min-h-12 w-full rounded-xl bg-navy text-sm font-bold text-white disabled:opacity-70"
+              type="button"
+              onClick={handleCustomSelect}
+              className={`w-full rounded-2xl border-2 border-dashed py-3 text-sm font-semibold transition-all ${
+                showCustom ? 'border-accent bg-accent/5 text-accent' : 'border-slate-200 text-muted'
+              }`}
             >
-              {loading ? 'Uploading & Submitting...' : 'Submit Donation Proof'}
+              {showCustom ? 'Enter custom amount below' : '+ Enter custom amount'}
             </button>
-          </form>
+
+            {showCustom ? (
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-navy">₹</span>
+                <input
+                  type="number"
+                  value={customAmount}
+                  onChange={(e) => setCustomAmount(e.target.value)}
+                  placeholder="0"
+                  min="1"
+                  autoFocus
+                  className="min-h-14 w-full rounded-2xl border-2 border-accent pl-9 pr-4 text-xl font-bold text-navy outline-none focus:ring-2 focus:ring-accent/30"
+                />
+              </div>
+            ) : null}
+
+            {/* Impact preview */}
+            {finalAmount ? (
+              <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 flex items-center gap-3">
+                <span className="text-2xl">🍱</span>
+                <div>
+                  <p className="text-sm font-bold text-emerald-800">
+                    {formatCurrency(finalAmount)} = ~{Math.max(1, Math.round(finalAmount / 50))} meal{finalAmount >= 100 ? 's' : ''}
+                  </p>
+                  <p className="text-xs text-emerald-600">for elders at {ngo.name}</p>
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={handleProceedToPay}
+              disabled={!finalAmount}
+              className="min-h-13 w-full rounded-2xl bg-accent text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-2 shadow-lg shadow-accent/30"
+            >
+              Proceed to Pay {finalAmount ? formatCurrency(finalAmount) : ''}
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </section>
         ) : null}
+
+        {/* Step 2: Pay via UPI */}
+        {step === 'pay' ? (
+          <section className="rounded-[28px] bg-white p-5 shadow-card space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-extrabold text-navy">Pay via UPI</h2>
+                <p className="text-sm text-muted mt-0.5">Scan QR or use UPI ID</p>
+              </div>
+              <div className="rounded-2xl bg-accent/10 px-4 py-2 text-center">
+                <p className="text-xl font-extrabold text-accent">{formatCurrency(finalAmount)}</p>
+              </div>
+            </div>
+
+            {/* QR Code */}
+            {ngo.qrCodeUrl ? (
+              <div className="rounded-[20px] bg-cream p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-wide text-muted mb-3">Scan with any UPI app</p>
+                <img
+                  src={ngo.qrCodeUrl}
+                  alt="UPI QR Code"
+                  className="mx-auto h-52 w-52 rounded-2xl bg-white object-contain p-2 shadow-card"
+                />
+                <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted">
+                  <span className="h-4 w-4 rounded-full bg-slate-200 flex items-center justify-center text-[8px]">G</span>
+                  <span className="h-4 w-4 rounded-full bg-indigo-100 flex items-center justify-center text-[8px] text-indigo-600">P</span>
+                  <span className="h-4 w-4 rounded-full bg-blue-100 flex items-center justify-center text-[8px] text-blue-600">P</span>
+                  GPay · PhonePe · Paytm
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-[20px] bg-cream p-5 text-center">
+                <QrCode className="h-16 w-16 text-muted mx-auto mb-2" />
+                <p className="text-sm text-muted">No QR configured. Use the UPI ID below.</p>
+              </div>
+            )}
+
+            {/* UPI ID copy */}
+            {ngo.upiId ? (
+              <div className="rounded-2xl border border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted font-semibold">UPI ID</p>
+                  <p className="text-sm font-bold text-navy font-mono">{ngo.upiId}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyUpi}
+                  className={`flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
+                    copied ? 'bg-emerald-500 text-white' : 'bg-navy text-white'
+                  }`}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            ) : null}
+
+            {/* Pay with UPI app button */}
+            {upiLink ? (
+              <button
+                type="button"
+                onClick={handleOpenUpiApp}
+                className="w-full rounded-2xl bg-gradient-to-r from-navy to-slate-700 py-4 text-sm font-bold text-white flex items-center justify-center gap-3 shadow-lg"
+              >
+                <Smartphone className="h-5 w-5" />
+                Open UPI App to Pay
+              </button>
+            ) : null}
+
+            {/* Steps */}
+            <ol className="space-y-2 rounded-2xl bg-cream px-4 py-4 text-sm text-muted">
+              <li className="flex gap-2.5 items-start">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                Scan the QR or copy the UPI ID into any UPI app.
+              </li>
+              <li className="flex gap-2.5 items-start">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                Complete payment of <strong className="text-navy">{formatCurrency(finalAmount)}</strong>.
+              </li>
+              <li className="flex gap-2.5 items-start">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                Come back here and click <strong className="text-navy">"I Have Paid"</strong>.
+              </li>
+            </ol>
+
+            <button
+              type="button"
+              onClick={() => setStep('confirm')}
+              className="w-full rounded-2xl bg-accent py-4 text-sm font-bold text-white shadow-lg shadow-accent/30 flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="h-5 w-5" />
+              I Have Paid — Confirm
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStep('select')}
+              className="w-full rounded-xl py-2 text-sm text-muted"
+            >
+              ← Change amount
+            </button>
+          </section>
+        ) : null}
+
+        {/* Step 3: Confirmation */}
+        {step === 'confirm' ? (
+          <section className="rounded-[28px] bg-white p-5 shadow-card space-y-5">
+            <div>
+              <h2 className="text-xl font-extrabold text-navy">Confirm donation</h2>
+              <p className="text-sm text-muted mt-1">Add a screenshot to help the NGO verify faster (optional but recommended).</p>
+            </div>
+
+            <div className="rounded-2xl bg-cream px-4 py-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted">NGO</span>
+                <span className="font-semibold text-navy">{ngo.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted">Amount</span>
+                <span className="font-bold text-accent">{formatCurrency(finalAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted">UPI ID</span>
+                <span className="font-mono text-xs text-navy">{ngo.upiId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted">Status</span>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Pending verification</span>
+              </div>
+            </div>
+
+            {/* Screenshot upload */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-muted mb-2">Payment screenshot (recommended)</p>
+              {screenshotPreview ? (
+                <div className="relative rounded-2xl overflow-hidden">
+                  <img src={screenshotPreview} alt="Screenshot" className="w-full h-48 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => { setScreenshot(null); setScreenshotPreview(null); }}
+                    className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex min-h-24 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 text-sm text-muted hover:border-accent hover:text-accent transition-colors">
+                  <Upload className="h-6 w-6" />
+                  <span>Upload payment screenshot</span>
+                  <span className="text-xs">JPG, PNG, WebP up to 5MB</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleScreenshotChange}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className="rounded-2xl bg-blue-50 border border-blue-100 px-4 py-3">
+              <p className="text-xs font-semibold text-blue-800">🔒 Secure & free</p>
+              <p className="text-xs text-blue-600 mt-0.5">No payment gateway. 100% of your donation goes to the NGO. The NGO will verify your payment and issue a certificate.</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleIHavePaid}
+              disabled={loading}
+              className="min-h-13 w-full rounded-2xl bg-emerald-600 text-sm font-bold text-white disabled:opacity-70 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30"
+            >
+              {loading ? (
+                <>
+                  <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-5 w-5" />
+                  Submit & Record Donation
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStep('pay')}
+              className="w-full rounded-xl py-2 text-sm text-muted"
+            >
+              ← Back to payment
+            </button>
+          </section>
+        ) : null}
+
       </div>
     </div>
   );
